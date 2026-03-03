@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CO2 Drift Compensator - 漂移补偿可视化</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        :root { --primary: #007bff; --danger: #dc3545; --success: #28a745; --bg: #f4f6f9; }
+        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg); color: #333; padding: 20px; margin: 0; }
+        
+        .container { max-width: 1400px; margin: 0 auto; background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        h1 { text-align: center; color: #1f1f1f; margin-bottom: 20px; font-weight: 700; }
+        h3 { margin-top: 0; color: #444; font-size: 16px; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
+        
+        .panel { background: #fff; border: 1px solid #e9ecef; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
+        .panel.highlight { background-color: #f8f9fa; border-color: #dae0e5; }
+        
+        .controls { display: flex; gap: 15px; flex-wrap: wrap; align-items: center; }
+        .group { display: flex; align-items: center; gap: 8px; }
+        
+        label { font-weight: 600; font-size: 14px; color: #555; white-space: nowrap; }
+        select, input[type="datetime-local"] { padding: 6px 10px; border: 1px solid #ced4da; border-radius: 4px; outline: none; font-size: 13px; }
+        
+        .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; transition: 0.2s; font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: #0069d9; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-danger:hover { background: #c82333; }
+        .btn-outline { background: white; color: var(--primary); border: 1px solid var(--primary); }
+        .btn-outline:hover { background: #e2e6ea; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+        .ref-row { display: flex; align-items: center; gap: 10px; background: #fff; padding: 8px; border: 1px solid #eee; border-radius: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+        .slope-display { font-family: monospace; color: var(--success); font-weight: bold; font-size: 13px; min-width: 120px; }
+        
+        #mainChart { width: 100%; height: 600px; margin-top: 20px; }
+
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            .container { padding: 15px; display: flex; flex-direction: column; }
+            h1 { font-size: 20px; margin-bottom: 15px; }
+            
+            .panel:not(.highlight) { order: 1; }
+            #mainChart { order: 2; margin-top: 0; margin-bottom: 20px; height: 400px; }
+            .panel.highlight { order: 3; margin-bottom: 0; }
+
+            .controls { flex-direction: column; align-items: stretch; gap: 10px; }
+            .group { flex-wrap: wrap; width: 100%; justify-content: space-between; }
+            input[type="datetime-local"] { flex: 1; min-width: 140px; }
+            .btn { flex: 1; padding: 10px; } 
+            .group[style*="border-left"] { border-left: none !important; padding-left: 0 !important; margin-left: 0 !important; border-top: 1px solid #ddd; padding-top: 10px; }
+            .ref-row { gap: 5px; }
+            .ref-row label { width: 100%; margin-bottom: 5px; }
+            .ref-row input { width: 45%; }
+            .ref-row span { font-size: 12px; }
+            .slope-display { width: 100%; margin-top: 5px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>CO2 Drift Compensator - 漂移补偿可视化</h1>
+    
+    <p style="text-align: center; color: #888; font-size: 13px; margin: -10px 0 15px 0;">
+        温湿度接口已预留，当前仅采集 CO2 数据。如需扩展，可在固件中添加 DHT/SHT 系列传感器。
+    </p>
+
+    <div class="panel">
+        <div class="controls">
+            <div class="group">
+                <button class="btn btn-outline" onclick="setRange(1)">24小时</button>
+                <button class="btn btn-outline" onclick="setRange(3)">3天</button>
+                <button class="btn btn-outline" onclick="setRange(7)">7天</button>
+            </div>
+            
+            <div class="group" style="margin-left: auto;">
+                <label>范围:</label>
+                <input type="datetime-local" id="startTime">
+                <span>至</span>
+                <input type="datetime-local" id="endTime">
+                <button class="btn btn-primary" onclick="loadCustomRange()">查询</button>
+            </div>
+
+            <div class="group" style="margin-left: 15px; border-left: 1px solid #ddd; padding-left: 15px;">
+                <label>粒度:</label>
+                <select id="granularity" onchange="renderChart()">
+                    <option value="raw">原始数据</option>
+                    <option value="hour">小时均值</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel highlight">
+        <h3>多点锚定漂移补偿 (Non-linear Drift Compensation)</h3>
+        <p style="font-size: 13px; color: #666; margin-bottom: 15px;">
+            选择CO2应该稳定的时间段作为基准锚点，系统将自动计算漂移率并修正数据。
+        </p>
+        <div id="reference-container"></div>
+        <div class="controls" style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 15px;">
+            <button class="btn btn-outline" onclick="addReferenceRow()">+ 添加锚点</button>
+            <button class="btn btn-primary" onclick="applyAdvancedCorrection()">执行漂移补偿</button>
+            <button class="btn btn-danger" onclick="resetCorrection()">↺ 重置</button>
+        </div>
+    </div>
+
+    <div id="mainChart"></div>
+</div>
+
+<script>
+    var myChart = echarts.init(document.getElementById('mainChart'));
+    var globalRawData = [];
+    var correctionState = { active: false, anchors: [] };
+
+    function fetchData(startStr, endStr) {
+        myChart.showLoading();
+        fetch(`get_data.php?start=${startStr}&end=${endStr}`)
+            .then(response => response.json())
+            .then(data => {
+                globalRawData = data;
+                renderChart();
+                myChart.hideLoading();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                myChart.hideLoading();
+                alert('获取数据失败');
+            });
+    }
+
+    function setRange(days) {
+        const end = new Date();
+        const start = new Date();
+        start.setDate(start.getDate() - days);
+        const startStr = formatDateForInput(start);
+        const endStr = formatDateForInput(end);
+        document.getElementById('startTime').value = startStr;
+        document.getElementById('endTime').value = endStr;
+        fetchData(formatDateForReq(start), formatDateForReq(end));
+    }
+
+    function loadCustomRange() {
+        let startVal = document.getElementById('startTime').value;
+        let endVal = document.getElementById('endTime').value;
+        if(!startVal || !endVal) return alert("请选择时间范围");
+        fetchData(startVal.replace('T', ' '), endVal.replace('T', ' '));
+    }
+
+    function formatDateForInput(date) {
+        const offset = date.getTimezoneOffset() * 60000;
+        return (new Date(date - offset)).toISOString().slice(0, 16);
+    }
+    
+    function formatDateForReq(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        const h = String(date.getHours()).padStart(2, '0');
+        const min = String(date.getMinutes()).padStart(2, '0');
+        const s = String(date.getSeconds()).padStart(2, '0');
+        return `${y}-${m}-${d} ${h}:${min}:${s}`;
+    }
+
+    function groupDataByHour(rawData) {
+        if (!rawData || rawData.length === 0) return [];
+        const buckets = {};
+        rawData.forEach(item => {
+            let d = new Date(item.timestamp.replace(' ', 'T'));
+            d.setMinutes(0, 0, 0);
+            let key = d.getTime();
+            if (!buckets[key]) buckets[key] = { co2: 0, temp: 0, hum: 0, count: 0, tempCount: 0, humCount: 0, timeStr: formatDateForReq(d) };
+            buckets[key].co2 += parseFloat(item.co2_ppm) || 0;
+            if (item.temperature != null) { buckets[key].temp += parseFloat(item.temperature); buckets[key].tempCount++; }
+            if (item.humidity != null) { buckets[key].hum += parseFloat(item.humidity); buckets[key].humCount++; }
+            buckets[key].count++;
+        });
+        const sortedKeys = Object.keys(buckets).sort();
+        return sortedKeys.map(key => {
+            const b = buckets[key];
+            return {
+                timestamp: b.timeStr,
+                co2_ppm: (b.co2 / b.count).toFixed(1),
+                temperature: b.tempCount > 0 ? (b.temp / b.tempCount).toFixed(1) : null,
+                humidity: b.humCount > 0 ? (b.hum / b.humCount).toFixed(1) : null
+            };
+        });
+    }
+
+    function calculateSlope(data, startTs, endTs) {
+        let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0, count = 0;
+        for (let item of data) {
+            let t = new Date(item.timestamp.replace(' ', 'T')).getTime();
+            if (t >= startTs && t <= endTs) {
+                let y = parseFloat(item.co2_ppm);
+                if (!isNaN(y)) {
+                    sumX += t; sumY += y; sumXY += (t * y); sumXX += (t * t); count++;
+                }
+            }
+        }
+        if (count < 2) return null;
+        return (count * sumXY - sumX * sumY) / (count * sumXX - sumX * sumX);
+    }
+
+    function getInstantSlope(currentTime, anchors) {
+        if (anchors.length === 1) return anchors[0].slope;
+        if (currentTime <= anchors[0].time) return anchors[0].slope;
+        if (currentTime >= anchors[anchors.length - 1].time) return anchors[anchors.length - 1].slope;
+        for (let i = 0; i < anchors.length - 1; i++) {
+            let p1 = anchors[i];
+            let p2 = anchors[i+1];
+            if (currentTime >= p1.time && currentTime <= p2.time) {
+                let ratio = (currentTime - p1.time) / (p2.time - p1.time);
+                return p1.slope + (p2.slope - p1.slope) * ratio;
+            }
+        }
+        return 0;
+    }
+
+    function processDataForChart(dataSource, gapTolerance) {
+        if (!dataSource || dataSource.length === 0) return { dates: [], co2Raw: [], co2Corrected: [], temp: [], hum: [] };
+
+        const dates = [];
+        const co2Raw = [];
+        const co2Corrected = [];
+        const temp = [];
+        const hum = [];
+        
+        let accumulatedDrift = 0;
+        let lastTs = new Date(dataSource[0].timestamp.replace(' ', 'T')).getTime();
+
+        for (let i = 0; i < dataSource.length; i++) {
+            const item = dataSource[i];
+            const currentTs = new Date(item.timestamp.replace(' ', 'T')).getTime();
+            const originalVal = parseFloat(item.co2_ppm);
+
+            if (i > 0) {
+                let timeDiff = currentTs - lastTs;
+                if (timeDiff > gapTolerance) {
+                    dates.push(""); 
+                    co2Raw.push(null); co2Corrected.push(null); temp.push(null); hum.push(null);
+                }
+            }
+
+            let displayTime = item.timestamp.substring(5, 16);
+            dates.push(displayTime);
+            co2Raw.push(Math.round(originalVal));
+            temp.push(item.temperature);
+            hum.push(item.humidity);
+
+            if (correctionState.active && correctionState.anchors.length > 0) {
+                let dt = currentTs - lastTs;
+                if (i === 0 || dt > gapTolerance) dt = 0; 
+                if (dt < 0) dt = 0;
+
+                let currentRate = getInstantSlope(currentTs, correctionState.anchors);
+                accumulatedDrift += (currentRate * dt);
+                
+                let fixedVal = originalVal - accumulatedDrift;
+                co2Corrected.push(Math.round(fixedVal));
+            } else {
+                co2Corrected.push(null);
+            }
+
+            lastTs = currentTs;
+        }
+
+        return { dates, co2Raw, co2Corrected, temp, hum };
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+        addReferenceRow(); 
+        addReferenceRow();
+        setRange(1);
+    });
+
+    function addReferenceRow() {
+        const container = document.getElementById('reference-container');
+        const count = container.children.length + 1;
+        const div = document.createElement('div');
+        div.className = 'ref-row';
+        div.innerHTML = `
+            <label>锚点 ${count}:</label>
+            <input type="datetime-local" class="ref-start">
+            <span>至</span>
+            <input type="datetime-local" class="ref-end">
+            <span class="slope-display">等待计算...</span>
+            <button class="btn btn-sm btn-outline btn-danger" onclick="this.parentElement.remove()">×</button>
+        `;
+        container.appendChild(div);
+    }
+
+    function applyAdvancedCorrection() {
+        if (!globalRawData || globalRawData.length === 0) return alert("请先查询数据！");
+        
+        const rows = document.querySelectorAll('.ref-row');
+        let newAnchors = [];
+
+        rows.forEach((row, index) => {
+            const startInput = row.querySelector('.ref-start').value;
+            const endInput = row.querySelector('.ref-end').value;
+            const displaySpan = row.querySelector('.slope-display');
+            if (startInput && endInput) {
+                const tStart = new Date(startInput).getTime();
+                const tEnd = new Date(endInput).getTime();
+                if (tEnd <= tStart) { displaySpan.innerText = "时间无效"; displaySpan.style.color = "red"; return; }
+
+                const slope = calculateSlope(globalRawData, tStart, tEnd);
+                if (slope !== null) {
+                    const midTime = (tStart + tEnd) / 2;
+                    const ppmPerHour = (slope * 3600 * 1000).toFixed(2);
+                    newAnchors.push({ time: midTime, slope: slope });
+                    displaySpan.innerText = `漂移率: ${ppmPerHour} ppm/h`;
+                    displaySpan.style.color = "#28a745";
+                } else {
+                    displaySpan.innerText = "无数据"; displaySpan.style.color = "red";
+                }
+            }
+        });
+
+        if (newAnchors.length === 0) return alert("请设置有效的锚点时间段");
+        newAnchors.sort((a, b) => a.time - b.time);
+        correctionState.anchors = newAnchors;
+        correctionState.active = true;
+        
+        renderChart();
+    }
+
+    function resetCorrection() {
+        correctionState.active = false;
+        correctionState.anchors = [];
+        document.querySelectorAll('.slope-display').forEach(el => el.innerText = "等待计算...");
+        renderChart();
+    }
+
+    function renderChart() {
+        if (globalRawData.length === 0) return;
+
+        const granularity = document.getElementById('granularity').value;
+        let chartData;
+        
+        if (granularity === 'hour') {
+            const hourlyData = groupDataByHour(globalRawData);
+            chartData = processDataForChart(hourlyData, 70 * 60 * 1000); 
+        } else {
+            chartData = processDataForChart(globalRawData, 15 * 60 * 1000);
+        }
+        
+        const hasValidTempHum = chartData.temp.some(v => v != null);
+
+        const option = {
+            tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+            legend: { 
+                top: 10,
+                data: hasValidTempHum ? ['原始 CO2', '补偿后 CO2', '温度', '湿度'] : ['原始 CO2', '补偿后 CO2']
+            },
+            grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
+            toolbox: { feature: { dataZoom: { yAxisIndex: 'none' }, restore: {}, saveAsImage: {} } },
+            dataZoom: [{ type: 'slider', height: 20 }, { type: 'inside' }],
+            xAxis: { type: 'category', boundaryGap: false, data: chartData.dates },
+            yAxis: [
+                { type: 'value', name: 'CO2 (ppm)', scale: true, splitLine: { lineStyle: { type: 'dashed' } } },
+                { type: 'value', name: '温湿度', scale: true, show: true, axisLabel: { formatter: '{value}' }, splitLine: { show: false } }
+            ],
+            series: [
+                {
+                    name: '原始 CO2',
+                    type: 'line',
+                    data: chartData.co2Raw,
+                    connectNulls: false, 
+                    showSymbol: false, 
+                    smooth: true,
+                    itemStyle: { color: '#28a745' }, 
+                    lineStyle: { 
+                        color: correctionState.active ? '#ccc' : '#28a745', 
+                        width: correctionState.active ? 1 : 2 
+                    },
+                    z: 1
+                },
+                {
+                    name: '补偿后 CO2',
+                    type: 'line',
+                    data: chartData.co2Corrected,
+                    connectNulls: false,
+                    showSymbol: false,
+                    smooth: true,
+                    symbol: 'emptyCircle',
+                    symbolSize: 6,
+                    itemStyle: { color: '#e83e8c', borderWidth: 2 }, 
+                    lineStyle: { color: '#e83e8c', width: 2 },
+                    z: 2
+                },
+                {
+                    name: '温度',
+                    type: 'line',
+                    yAxisIndex: 1,
+                    data: hasValidTempHum ? chartData.temp : [],
+                    connectNulls: false,
+                    showSymbol: false,
+                    smooth: true, 
+                    itemStyle: { color: '#dc3545' },
+                    lineStyle: { width: 1.5, type: 'dashed' }
+                },
+                {
+                    name: '湿度',
+                    type: 'line',
+                    yAxisIndex: 1,
+                    data: hasValidTempHum ? chartData.hum : [],
+                    connectNulls: false,
+                    showSymbol: false,
+                    smooth: true, 
+                    itemStyle: { color: '#007bff' },
+                    lineStyle: { width: 1.5, type: 'dotted' }
+                }
+            ]
+        };
+        myChart.setOption(option, true);
+    }
+    
+    window.onresize = () => myChart.resize();
+
+</script>
+</body>
+</html>
