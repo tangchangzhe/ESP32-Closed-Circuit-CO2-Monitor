@@ -18,7 +18,7 @@ An ESP32-based closed-circuit gas circuit CO2 monitoring system (pump-driven), d
 
 **Solution**: A non-linear drift compensation algorithm implemented in the frontend:
 
-1. **Anchor Selection (Cycle Method)**: Select start and end points of a complete light-dark cycle as anchors. Theoretically, after one complete cycle, CO2 should return to a similar level; the measured difference represents cumulative drift within that cycle. Essentially, gas leakage superimposes a downward trend onto the periodic biological fluctuations; the compensation algorithm levels this tilted baseline to restore the true biological signal
+1. **Anchor Selection (Cycle Method)**: Select start and end points of a complete light-dark cycle as anchors. Theoretically, after one complete cycle, CO2 should return to a similar level; the measured difference represents cumulative drift within that cycle. Essentially, gas leakage superimposes a downward trend（exponential decay function) onto the periodic biological fluctuations; the compensation algorithm levels this tilted baseline to restore the true biological signal
    > *Note: The cycle method has considerable error margin. It is only suitable for scenarios where drift trends are clearly discernible, aimed at restoring approximate periodic waveforms rather than precise quantitative analysis
 
 2. **Slope Calculation**: Linear regression on each anchor period to extract drift rate (ppm/h)
