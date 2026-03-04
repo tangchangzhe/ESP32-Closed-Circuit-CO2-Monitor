@@ -31,7 +31,7 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph      密封盒
+    subgraph     
         B[进气口] --> C[过滤装置]
         C --> D[气泵]
         D --> E[检测气室<br/>传感器在此]
