@@ -61,7 +61,7 @@ The system ensures clean, aligned timestamps for data consistency:
 ### Complete IoT Data Pipeline
 
 ```
-ESP32 Sampling → HTTP Upload → PHP Storage → ECharts Visualization
+ESP32 Sampling -> HTTP Upload -> PHP Storage -> ECharts Visualization
 ```
 
 ## Hardware Requirements
@@ -164,30 +164,30 @@ Adjustable in `config.h`:
 
 ```
 esp32-co2-drift-compensator/
-├── firmware/              # ESP32 Firmware
-│   ├── src/
-│   │   ├── main.cpp
-│   │   └── config.h.example
-│   └── platformio.ini
-├── web/                   # Web Frontend + PHP Backend
-│   ├── index.html         # Data visualization page
-│   ├── get_data.php       # Data query API
-│   ├── sensor_data.php    # Data receiving API
-│   └── config.php.example
-├── data/
-│   └── sample_data.sql    # Sample data (Jan 3-9 test)
-├── docs/
-│   ├── HARDWARE.md        # Hardware wiring guide
-│   └── images/
-└── README.md
+|-- firmware/              # ESP32 Firmware
+|   |-- src/
+|   |   |-- main.cpp
+|   |   +-- config.h.example
+|   +-- platformio.ini
+|-- web/                   # Web Frontend + PHP Backend
+|   |-- index.html         # Data visualization page
+|   |-- get_data.php       # Data query API
+|   |-- sensor_data.php    # Data receiving API
+|   +-- config.php.example
+|-- data/
+|   +-- sample_data.sql    # Sample data (Jan 3-9 test)
+|-- docs/
+|   |-- HARDWARE.md        # Hardware wiring guide
+|   +-- images/
++-- README.md
 ```
 
 ## Use Cases
 
-This project was originally developed for monitoring algae respiration in sealed chambers, but some ideas of this project is applicable to any scenario with:
+This project was originally developed for monitoring algae respiration in sealed chambers, but the concepts and approaches can be applied to other scenarios involving:
 
 - Poor gas circuit sealing
-- Long-term continuous CO2 monitoring needs
+- Long-term continuous monitoring of CO2 or other gases
 - Sensor long-term drift issues
 
 ## Tech Stack
