@@ -1,6 +1,6 @@
 # ESP32 Closed-Loop CO2 Monitor with Drift Compensation
 
-[中文文档](README_CN.md)
+[中文文档](README.md)
 
 A pump-based closed-loop CO2 monitoring system for sealed chambers (e.g., microbial culture vessels), featuring built-in multi-anchor drift compensation algorithm for low-cost applications with gas leakage.
 
