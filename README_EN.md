@@ -4,6 +4,15 @@
 
 An ESP32-based closed-circuit gas circuit CO2 monitoring system (pump-driven), designed for sealed chambers (e.g., microbial culture vessels), featuring a multi-anchor drift compensation algorithm to address data drift caused by inadequate gas-tightness in low-cost setups.
 
+## Application Scenarios
+
+This project was originally developed to monitor algae respiration and photosynthesis in sealed chambers. It can provide reference ideas for the following scenarios:
+
+- Gas metabolism monitoring of organisms (algae, microbes, etc.) in small sealed chambers
+- Low-cost experimental setups with poor gas circuit sealing
+- Scenarios requiring long-term continuous monitoring of CO2 or other sensor data
+- Applications where sensors exhibit long-term drift issues
+
 ## Demo
 
 | Raw Data (Continuous drop due to leakage) | Compensated Data (Restored true fluctuations) |
@@ -14,15 +23,24 @@ An ESP32-based closed-circuit gas circuit CO2 monitoring system (pump-driven), d
 
 ### Multi-Anchor Drift Compensation Algorithm
 
-**Problem**: Sealed gas circuits inevitably leak over time, causing a systematic downward drift in CO2 readings that masks the true biological activity signal.
+**Problem**: Sealed gas circuits inevitably leak over time, causing a systematic downward drift in CO2 readings (drift approximates exponential decay) that masks the true biological activity signal.
 
-**Solution**: A non-linear drift compensation algorithm implemented in the frontend:
+**Background**: Using algae cultivation as an example, during light-dark cycles:
+- **Dark Period**: Algae perform only respiration, releasing CO2, so concentration should **rise**
+- **Light Period**: Photosynthesis exceeds respiration, net CO2 absorption, so concentration should **fall**
+- **After a Complete Cycle**: Due to the net effect of photosynthesis, CO2 concentration typically decreases somewhat (rather than returning to the starting point)
 
-1. **Anchor Selection (Cycle Method)**: Select start and end points of a complete light-dark cycle as anchors. Theoretically, after one complete cycle, CO2 should return to a similar level; the measured difference represents cumulative drift within that cycle. Essentially, gas leakage superimposes a downward trend（exponential decay function) onto the periodic biological fluctuations; the compensation algorithm levels this tilted baseline to restore the true biological signal
-   > *Note: The cycle method has considerable error margin. It is only suitable for scenarios where drift trends are clearly discernible, aimed at restoring approximate periodic waveforms rather than precise quantitative analysis
+However, due to gas circuit leakage, the overall data is superimposed with a continuous downward trend. This causes:
+- Curves that should rise during dark periods become slowly declining (or the rise is diminished)
+- The decline during light periods is amplified
 
-2. **Slope Calculation**: Linear regression on each anchor period to extract drift rate (ppm/h)
-3. **Interpolated Transition**: Linear interpolation between anchors for smooth drift rate transitions
+**Solution**: A multi-anchor drift compensation algorithm implemented in the frontend. Since the downward trend caused by leakage is non-linear (approximating exponential decay), the drift rate varies over time, requiring multiple anchors to capture drift rates at different time periods:
+
+1. **Anchor Selection (Cycle Method)**: Select start and end points of one or more light-dark cycles as anchors. Since the drift rate itself cannot be directly observed, and a complete cycle includes both rising segments (dark period) and falling segments (light period), the slope calculated for the entire cycle can approximate the "median" of the drift rate for that period—sufficient to restore the suppressed dark-period curves to their normal rising trend without over-compensating and erroneously pushing light-period declining curves upward
+   > *Note: This method is an empirical estimation, only suitable for scenarios where drift trends are clearly discernible, aimed at restoring approximate periodic waveforms rather than precise quantitative analysis
+
+2. **Slope Calculation**: Linear regression on each anchor period to extract the slope as the drift rate for that period
+3. **Interpolated Transition**: Linear interpolation between anchors for smooth drift rate transitions across different periods
 4. **Cumulative Correction**: Integrate the drift rate over time, subtract accumulated drift from raw readings
 
 **Mathematical Expression**:
@@ -39,16 +57,16 @@ An ESP32-based closed-circuit gas circuit CO2 monitoring system (pump-driven), d
 
 This mechanism trades off exact timestamp-to-sample correspondence for well-aligned timestamp sequences and reduced NTP query frequency.
 
-The system ensures accurate and uniform timestamps through a dual mechanism:
+The system ensures relatively accurate and uniform timestamps through a dual mechanism:
 
-1. **NTP Time Sync**: After each measurement (as well as on power-on or recovery from power loss), the system syncs with an NTP server and calculates the next 10-minute mark as the next sampling time, correcting accumulated RTC drift (embedded crystal oscillators can drift by several seconds to tens of seconds per day)
-2. **Grid Alignment**: Timestamps are aligned to 10-minute boundaries (`00:00:00`, `00:10:00`, `00:20:00`...). A single measurement takes ~45 seconds, but the uploaded timestamp reflects the **scheduled time**, not the completion time
+1. **NTP Time Sync**: After each measurement (as well as on power-on or recovery from power loss), the system syncs with an NTP server and calculates the next 10-minute mark as the next sampling time, correcting accumulated RTC drift (embedded crystal oscillators can drift by several seconds to tens of seconds per day), keeping timestamps as close to actual time as possible
+2. **Grid Alignment**: Timestamps are aligned to 10-minute boundaries (`00:00:00`, `00:10:00`, `00:20:00`...). A single measurement process takes ~45 seconds, but the uploaded timestamp reflects the **scheduled time**, not the completion time
 
 **Significance of Timestamp Alignment**:
 
 | Potential Issue | Impact Without Alignment | Role of Alignment Mechanism |
 | --------------- | ------------------------ | --------------------------- |
-| RTC Cumulative Drift | After a week, timestamps may drift by several minutes, causing temporal misalignment with real-world events (e.g., sunrise/sunset) | NTP calibration after each measurement ensures long-term time accuracy |
+| RTC Cumulative Drift | After a week, timestamps may drift by tens of minutes, causing temporal misalignment with real-world events (e.g., light/dark operations) | NTP calibration after each measurement ensures long-term time accuracy |
 | Multi-device Data Fusion | Inconsistent time bases across devices preclude cross-comparison analysis | Unified time reference enables direct overlay and comparison of multi-source data |
 | Data Indexing Efficiency | Scattered timestamps (`14:07:23`, `14:17:41`...) reduce retrieval and archival efficiency | Regularized timestamps (`14:00:00`, `14:10:00`...) facilitate indexing and visualization |
 
@@ -57,42 +75,39 @@ The system ensures accurate and uniform timestamps through a dual mechanism:
 PWM-controlled pump for closed-circuit gas circuit sampling:
 
 1. Pump circulation (adjustable duration and intensity)
-2. Stop pump, wait for pressure stabilization
+2. Stop pump, wait for pressure stabilization (adjustable duration)
 3. Read sensor data
 4. Real-time upload to server
 
 ### Automatic Startup
 
 - Power-on auto-start, no manual intervention required
-- Multi-WiFi hotspot support with automatic switching
+- Multi-WiFi hotspot support with automatic switching for improved fault tolerance
 - Auto-resume after power recovery
 - Automatic timestamp alignment to fixed intervals
 
 ### Complete IoT Data Pipeline
 
 ```
-ESP32 Sampling → HTTP Upload → PHP Storage → ECharts Visualization
+Sensor Sampling → HTTP Upload → PHP Storage → ECharts Visualization
 ```
 
-## Hardware Requirements
+## Hardware Overview
+
+> The following lists main hardware and wiring. For complete component list, wiring diagrams, and notes, see [Hardware Documentation](docs/HARDWARE.md)
 
 | Component | Model | Description |
 | --------- | ----- | ----------- |
 | MCU | ESP32-S3-DevKitC-1 | Main controller |
 | CO2 Sensor | ZG09SR | NDIR infrared, Modbus RTU |
 | Air Pump | 5V Micro Pump | PWM controlled, closed-circuit sampling |
-| Pump Driver | MOS Driver Module (4-pin) | PWM signal amplification |
-| Temp/Humidity | DHT22/SHT30 etc. | **Reserved interface, not yet used** |
-
-### Pin Connections
+| Pump Driver | MOS Driver Module | PWM signal amplification |
 
 | ESP32 Pin | Connected Device |
 | --------- | ---------------- |
 | GPIO 18 | MOS Driver Module PWM (Pump Control) |
 | GPIO 16 | ZG09SR RX |
 | GPIO 17 | ZG09SR TX |
-
-See [Hardware Documentation](docs/HARDWARE.md) for complete wiring instructions.
 
 ## Quick Start
 
@@ -143,8 +158,9 @@ CREATE TABLE co2_measurements (
 1. Open `index.html` in your browser
 2. Select a time range to query data
 3. In the "Drift Compensation" panel, add anchor periods
-   - Select periods where CO2 **rate of change is stable** (e.g., nighttime respiration-only period, photosynthesis equilibrium)
-   - The system calculates the measured slope; the difference from expected slope is the drift rate
+   - For each anchor, select the start and end points of **one** complete light-dark cycle (the fewer cycles included in an anchor period, the more accurate the estimated drift rate)
+   - The system performs linear regression on that period and calculates the slope as an approximate median of the drift rate
+   - Multiple anchors are interpolated to achieve smooth drift rate transitions
 4. Click "Apply Drift Compensation" to see the result
 
 ## Serial Commands
@@ -194,21 +210,13 @@ esp32-co2-drift-compensator/
 └── README.md
 ```
 
-## Application Scenarios
-
-This project was originally developed to monitor algae respiration in sealed chambers, but the concepts are applicable to other scenarios involving:
-
-- Poor gas circuit sealing
-- Long-term continuous CO2 or other sensor data monitoring
-- Sensor long-term drift issues
-
 ## Tech Stack
 
 - Firmware: PlatformIO + Arduino Framework
 - Sensor: ZG09SR (Modbus RTU)
 - Frontend: ECharts + Vanilla JS
 - Backend: PHP + MySQL
-- Hardware: ESP32-S3 + PWM Pump Control
+- Hardware: ESP32-S3 + MOS Module PWM Pump Control
 
 ## License
 
